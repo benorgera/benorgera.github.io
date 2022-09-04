@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chicago Violent Crime Map</title>
+    <style type="text/css">
+        #map {
+            width:100%;
+            height:100%;
+            position: absolute;
+            top: 0px;
+            left: 0px;
+        }
+    </style>
+
+    <!-- https://data.seattle.gov/resource/v5tj-kqhc.json?$order=distance_in_meters(location,%20%27POINT(41.8966166%20-87.6294048)%27)&$limit=5&$select=*,%20distance_in_meters(location_1,%20%27POINT(-122.3194183%2047.6145784)%27)%20AS%20range -->
+
+    <script async src="https://maps.googleapis.com/maps/api/js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+ 
+    <script type="text/javascript">
+
+    const badColors = ['white', 'yellow', 'orange', 'red'];
+
+    const localStorageKey = '__CHICAGO_VIOLENT_CRIME_MAP_DATA__';
+
+    // One chicago
+    // const lat = 41.8966166;
+    // const long = -87.6294048;
+
+    // The most dangerous neighborhood
+    // const lat = 41.762901;
+    // const long = -87.575795;
+
+    // Lincoln park
+    const lat = 41.921181;
+    const long = -87.645157;
+
+    const maxDist = 3.5;
+
+    // Note: yes the city of chicago spelled description wrong in their entire dataset
+    function interesting({ _primary_decsription: _primary_description, _secondary_description, latitude, longitude }) {
+
+        if (getDistanceFromLatLonInKm(lat, long, Number(latitude), Number(longitude)) > maxDist)
+            return undefined;
+
+
+        let prim = _primary_description.toLowerCase();
+        let sec = _secondary_description.toLowerCase();
+
+        let badness = -1;
+        let worst = false;
+
+        if (prim.includes('battery') || prim.includes('robbery') || prim.includes('assault')) {
+            badness = 0;
+        } else if (prim.includes('homicide')) {
+            worst = true;
+        }
+
+        if (badness > 0) console.log('bad');
+
+        if (sec.includes('gun') || sec.includes('firearm')) {
+            badness+=2;
+        } else if (sec.includes('dangerous weapon') || sec.includes('knife') || (sec.includes('aggravated') && !sec.includes('non-aggravated'))) {
+            badness++;
+        }
+
+      
+        if (worst || badness >= 0) {
+            return {
+                path: google.maps.SymbolPath.CIRCLE,
+                fillColor: badColors[worst ? badColors.length - 1 : badness],
+                fillOpacity: 0.6,
+                // strokeColor: '#00A',
+                strokeOpacity: 0.9,
+                strokeWeight: 0,
+                scale: 4
+            };
+        } else return undefined;
+    }
+
+    const state = { data: {}, timestamp: Date.now() };
+
+    $(window).on('load', async function() {
+        // this is the super lazy way of avoiding using node for this project. Pull the object-hash npm package
+        // source code right from github, and evaluate it
+        let objectHashScript = await new Promise(res => {
+            $.ajax({
+                url: 'https://raw.githubusercontent.com/puleos/object-hash/master/dist/object_hash.js',
+                dataType: 'text',
+                type: 'GET',
+                async: true,
+                statusCode: {
+                    404: function (response) {
+                        alert(404);
+                    },
+                    200: res
+                },
+                error: function (jqXHR, status, errorThrown) {
+                    alert('error');
+                }
+            });
+        });
+        eval(objectHashScript);
+
+        // Construct the catalog query string
+        // past years dataset: https://data.cityofchicago.org/resource/dfnk-7re6.json
+        // entire data set: https://data.cityofchicago.org/resource/c4ep-ee5m.json
+        // url = 'https://data.cityofchicago.org/resource/c4ep-ee5m.json?$order=distance_in_meters(    location,%20%27POINT(41.8966166%20-87.6294048)%27)&$limit=50&$select=*,%20distance_in_meters(    location,%20%27POINT(41.8966166%20-87.6294048)%27)%20AS%20range';
+        // url = 'https://data.cityofchicago.org/resource/c4ep-ee5m.json';
+        url = 'https://data.cityofchicago.org/resource/dfnk-7re6.json';
+        
+        // Intialize our map
+        var center = new google.maps.LatLng(lat, long);
+        var mapOptions = {
+          zoom: 13,
+          center: center
+        }
+        var map = new google.maps.Map(document.getElementById("map"), mapOptions);
+
+        function processCrimeEntry(entry) {
+            // let crimeHash = objectHash(entry);
+            // if (crimeHash in state) return undefined;
+
+            // state.data[crimeHash] = entry;
+    
+            let icon = interesting(entry);
+    
+            if (icon) {
+                new google.maps.Marker({
+                    position: new google.maps.LatLng(entry.latitude, entry.longitude),
+                    map: map,
+                    title: location.name,
+                    icon
+                });
+            }
+        }
+
+        let reloadData = true;
+        
+        // Retrieve our data and plot it
+        // const lookup = localStorage.getItem(localStorageKey);
+        // if (lookup) {
+        //     if (lookup.timestamp && Date.now() - lookup.timestamp <= 1000 * 60 * 60 * 24 * 7)
+        //         reloadData = false;
+
+        //     state.data = JSON.parse(lookup);
+
+        //     console.log('Populating map from browser local storage');
+
+        //     for (const entry of state.data) {
+        //         processCrimeEntry(entry);
+        //     }
+        // }
+
+        if (!reloadData) return;
+
+        console.log('Reloading data');
+
+        var last_len = undefined;
+        var cum_len = 0;
+        do {
+            await new Promise(res => {
+                $.getJSON(url + '?$offset=' + cum_len, function(data, textstatus) {
+    
+                    last_len = data.length;
+                    cum_len += last_len;
+        
+                    for (const entry of data) {
+                       processCrimeEntry(entry);
+                    }
+                    res();
+                });
+            });
+        } while (last_len > 0 && last_len !== undefined);
+        console.log(`done querying, total dataset size: ${cum_len}`);
+        // console.log(state.data.length);
+        // localStorage.setItem(localStorageKey, JSON.stringify(state));
+    });
+
+    // from: https://stackoverflow.com/questions/18883601/function-to-calculate-distance-between-two-coordinates
+    function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+        var R = 6371; // Radius of the earth in km
+        var dLat = deg2rad(lat2-lat1);  // deg2rad below
+        var dLon = deg2rad(lon2-lon1); 
+        var a = 
+          Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+          Math.sin(dLon/2) * Math.sin(dLon/2)
+          ; 
+        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+        var d = R * c; // Distance in km
+        return d;
+    }
+
+    function deg2rad(deg) {
+        return deg * (Math.PI/180)
+    }
+    </script>
+</head>
+<body>
+    <div id="map"/>
+</body>
+</html>
