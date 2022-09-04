@@ -23,8 +23,6 @@
 
     const BAD_COLORS = ['white', 'yellow', 'orange', 'red'];
 
-    const LOCAL_STORAGE_KEY = '__CHICAGO_VIOLENT_CRIME_MAP_DATA__';
-
     // past years dataset: https://data.cityofchicago.org/resource/dfnk-7re6.json
     // entire data set: https://data.cityofchicago.org/resource/c4ep-ee5m.json
     // Note the dataset is a socrata API, so it supports some querying. ie. limits, pagination, filtering, ...
@@ -32,8 +30,6 @@
     // We're therefore forced to filter by distance on the client side, but theoretically could filter crime type server side
     // Cureently, but we currently load the whole data set to the client and do all filtering locally
     const DATASET_URL = 'https://data.cityofchicago.org/resource/dfnk-7re6.json';
-
-    const MAX_DIST = 3.5;
 
     // Set map's center location. All datapoints are filtered to be <= MAX_DIST from this center point.
 
@@ -46,6 +42,7 @@
     // Lincoln park
     // const LAT_LONG = [41.921181, -87.645157]
 
+    const MAX_DIST = 3.5; // in kilometers
 
     // Note: yes the city of chicago spelled description wrong in their entire dataset (only misspelled primary description)
     function violent({ _primary_decsription: _primary_description, _secondary_description, latitude, longitude }) {
@@ -53,8 +50,8 @@
         if (getDistanceFromLatLonInKm(Number(latitude), Number(longitude), ...LAT_LONG) > MAX_DIST)
             return undefined;
 
-        let prim = _primary_description.toLowerCase();
-        let sec = _secondary_description.toLowerCase();
+        const prim = _primary_description.toLowerCase();
+        const sec = _secondary_description.toLowerCase();
 
         let badness = -1;
         let worst = false;
@@ -66,7 +63,7 @@
         }
 
         if (sec.includes('gun') || sec.includes('firearm')) {
-            badness+=2;
+            badness += 2;
         } else if (sec.includes('dangerous weapon') || sec.includes('knife') || (sec.includes('aggravated') && !sec.includes('non-aggravated'))) {
             badness++;
         }
@@ -84,46 +81,19 @@
         } else return undefined;
     }
 
-    const state = { data: {}, timestamp: Date.now() };
-
     $(window).on('load', async function() {
-        // this is the super lazy way of avoiding using node for this project. Pull the object-hash npm package
-        // source code right from github, and evaluate it
-        let objectHashScript = await new Promise(res => {
-            $.ajax({
-                url: 'https://raw.githubusercontent.com/puleos/object-hash/master/dist/object_hash.js',
-                dataType: 'text',
-                type: 'GET',
-                async: true,
-                statusCode: {
-                    404: function (response) {
-                        alert(404);
-                    },
-                    200: res
-                },
-                error: function (jqXHR, status, errorThrown) {
-                    alert('error');
-                }
-            });
-        });
-        eval(objectHashScript);
-
         
         // Intialize our map
-        var center = new google.maps.LatLng(...LAT_LONG);
-        var mapOptions = {
+        const center = new google.maps.LatLng(...LAT_LONG);
+        const mapOptions = {
           zoom: 13,
           center: center
         }
-        var map = new google.maps.Map(document.getElementById("map"), mapOptions);
+        const map = new google.maps.Map(document.getElementById("map"), mapOptions);
 
         function processCrimeEntry(entry) {
-            let crimeHash = objectHash(entry);
-            if (crimeHash in state) return undefined;
 
-            state.data[crimeHash] = entry;
-    
-            let icon = violent(entry);
+            const icon = violent(entry);
     
             if (icon) {
                 new google.maps.Marker({
@@ -135,29 +105,11 @@
             }
         }
 
-        let reloadData = true;
-        
         // Retrieve our data and plot it
-        const lookup = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (lookup) {
-            if (lookup.timestamp && Date.now() - lookup.timestamp <= 1000 * 60 * 60 * 24 * 7)
-                reloadData = false;
+        console.log('Loading data...');
 
-            state.data = JSON.parse(lookup);
-
-            console.log('Populating map from browser local storage data...');
-
-            for (const entry of state.data) {
-                processCrimeEntry(entry);
-            }
-        }
-
-        if (!reloadData) return;
-
-        console.log('Reloading data...');
-
-        var last_len = undefined;
-        var cum_len = 0;
+        let last_len = undefined;
+        let cum_len = 0;
         do {
             await new Promise(res => {
                 $.getJSON(DATASET_URL + '?$offset=' + cum_len, function(data, textstatus) {
@@ -173,22 +125,20 @@
             });
         } while (last_len > 0 && last_len !== undefined);
         console.log(`Done querying, total dataset size: ${cum_len}`);
-        console.log(state.data.length);
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
     });
 
     // from: https://stackoverflow.com/questions/18883601/function-to-calculate-distance-between-two-coordinates
     function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
-        var R = 6371; // Radius of the earth in km
-        var dLat = deg2rad(lat2-lat1);  // deg2rad below
-        var dLon = deg2rad(lon2-lon1); 
-        var a = 
+        const R = 6371; // Radius of the earth in km
+        const dLat = deg2rad(lat2-lat1);  // deg2rad below
+        const dLon = deg2rad(lon2-lon1); 
+        const a = 
           Math.sin(dLat/2) * Math.sin(dLat/2) +
           Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
           Math.sin(dLon/2) * Math.sin(dLon/2)
           ; 
-        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-        var d = R * c; // Distance in km
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+        const d = R * c; // Distance in km
         return d;
     }
 
