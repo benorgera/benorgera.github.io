@@ -21,30 +21,37 @@
  
     <script type="text/javascript">
 
-    const badColors = ['white', 'yellow', 'orange', 'red'];
+    const BAD_COLORS = ['white', 'yellow', 'orange', 'red'];
 
-    const localStorageKey = '__CHICAGO_VIOLENT_CRIME_MAP_DATA__';
+    const LOCAL_STORAGE_KEY = '__CHICAGO_VIOLENT_CRIME_MAP_DATA__';
+
+    // past years dataset: https://data.cityofchicago.org/resource/dfnk-7re6.json
+    // entire data set: https://data.cityofchicago.org/resource/c4ep-ee5m.json
+    // Note the dataset is a socrata API, so it supports some querying. ie. limits, pagination, filtering, ...
+    // It seems Chicago hasn't updated their data set to socrata 2.1, so we can't do distance based queries like: https://dev.socrata.com/docs/functions/distance_in_meters.html
+    // We're therefore forced to filter by distance on the client side, but theoretically could filter crime type server side
+    // Cureently, but we currently load the whole data set to the client and do all filtering locally
+    const DATASET_URL = 'https://data.cityofchicago.org/resource/dfnk-7re6.json';
+
+    const MAX_DIST = 3.5;
+
+    // Set map's center location. All datapoints are filtered to be <= MAX_DIST from this center point.
 
     // One chicago
-    // const lat = 41.8966166;
-    // const long = -87.6294048;
+    const LAT_LONG = [41.8966166, -87.6294048];
 
     // The most dangerous neighborhood
-    // const lat = 41.762901;
-    // const long = -87.575795;
+    // const LAT_LONG = [41.762901, -87.575795];
 
     // Lincoln park
-    const lat = 41.921181;
-    const long = -87.645157;
+    // const LAT_LONG = [41.921181, -87.645157]
 
-    const maxDist = 3.5;
 
-    // Note: yes the city of chicago spelled description wrong in their entire dataset
-    function interesting({ _primary_decsription: _primary_description, _secondary_description, latitude, longitude }) {
+    // Note: yes the city of chicago spelled description wrong in their entire dataset (only misspelled primary description)
+    function violent({ _primary_decsription: _primary_description, _secondary_description, latitude, longitude }) {
 
-        if (getDistanceFromLatLonInKm(lat, long, Number(latitude), Number(longitude)) > maxDist)
+        if (getDistanceFromLatLonInKm(Number(latitude), Number(longitude), ...LAT_LONG) > MAX_DIST)
             return undefined;
-
 
         let prim = _primary_description.toLowerCase();
         let sec = _secondary_description.toLowerCase();
@@ -58,8 +65,6 @@
             worst = true;
         }
 
-        if (badness > 0) console.log('bad');
-
         if (sec.includes('gun') || sec.includes('firearm')) {
             badness+=2;
         } else if (sec.includes('dangerous weapon') || sec.includes('knife') || (sec.includes('aggravated') && !sec.includes('non-aggravated'))) {
@@ -70,9 +75,8 @@
         if (worst || badness >= 0) {
             return {
                 path: google.maps.SymbolPath.CIRCLE,
-                fillColor: badColors[worst ? badColors.length - 1 : badness],
+                fillColor: BAD_COLORS[worst ? BAD_COLORS.length - 1 : badness],
                 fillOpacity: 0.6,
-                // strokeColor: '#00A',
                 strokeOpacity: 0.9,
                 strokeWeight: 0,
                 scale: 4
@@ -104,15 +108,9 @@
         });
         eval(objectHashScript);
 
-        // Construct the catalog query string
-        // past years dataset: https://data.cityofchicago.org/resource/dfnk-7re6.json
-        // entire data set: https://data.cityofchicago.org/resource/c4ep-ee5m.json
-        // url = 'https://data.cityofchicago.org/resource/c4ep-ee5m.json?$order=distance_in_meters(    location,%20%27POINT(41.8966166%20-87.6294048)%27)&$limit=50&$select=*,%20distance_in_meters(    location,%20%27POINT(41.8966166%20-87.6294048)%27)%20AS%20range';
-        // url = 'https://data.cityofchicago.org/resource/c4ep-ee5m.json';
-        url = 'https://data.cityofchicago.org/resource/dfnk-7re6.json';
         
         // Intialize our map
-        var center = new google.maps.LatLng(lat, long);
+        var center = new google.maps.LatLng(...LAT_LONG);
         var mapOptions = {
           zoom: 13,
           center: center
@@ -120,18 +118,18 @@
         var map = new google.maps.Map(document.getElementById("map"), mapOptions);
 
         function processCrimeEntry(entry) {
-            // let crimeHash = objectHash(entry);
-            // if (crimeHash in state) return undefined;
+            let crimeHash = objectHash(entry);
+            if (crimeHash in state) return undefined;
 
-            // state.data[crimeHash] = entry;
+            state.data[crimeHash] = entry;
     
-            let icon = interesting(entry);
+            let icon = violent(entry);
     
             if (icon) {
                 new google.maps.Marker({
                     position: new google.maps.LatLng(entry.latitude, entry.longitude),
                     map: map,
-                    title: location.name,
+                    // title: location.name,
                     icon
                 });
             }
@@ -140,29 +138,29 @@
         let reloadData = true;
         
         // Retrieve our data and plot it
-        // const lookup = localStorage.getItem(localStorageKey);
-        // if (lookup) {
-        //     if (lookup.timestamp && Date.now() - lookup.timestamp <= 1000 * 60 * 60 * 24 * 7)
-        //         reloadData = false;
+        const lookup = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (lookup) {
+            if (lookup.timestamp && Date.now() - lookup.timestamp <= 1000 * 60 * 60 * 24 * 7)
+                reloadData = false;
 
-        //     state.data = JSON.parse(lookup);
+            state.data = JSON.parse(lookup);
 
-        //     console.log('Populating map from browser local storage');
+            console.log('Populating map from browser local storage data...');
 
-        //     for (const entry of state.data) {
-        //         processCrimeEntry(entry);
-        //     }
-        // }
+            for (const entry of state.data) {
+                processCrimeEntry(entry);
+            }
+        }
 
         if (!reloadData) return;
 
-        console.log('Reloading data');
+        console.log('Reloading data...');
 
         var last_len = undefined;
         var cum_len = 0;
         do {
             await new Promise(res => {
-                $.getJSON(url + '?$offset=' + cum_len, function(data, textstatus) {
+                $.getJSON(DATASET_URL + '?$offset=' + cum_len, function(data, textstatus) {
     
                     last_len = data.length;
                     cum_len += last_len;
@@ -174,9 +172,9 @@
                 });
             });
         } while (last_len > 0 && last_len !== undefined);
-        console.log(`done querying, total dataset size: ${cum_len}`);
-        // console.log(state.data.length);
-        // localStorage.setItem(localStorageKey, JSON.stringify(state));
+        console.log(`Done querying, total dataset size: ${cum_len}`);
+        console.log(state.data.length);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
     });
 
     // from: https://stackoverflow.com/questions/18883601/function-to-calculate-distance-between-two-coordinates
