@@ -19,15 +19,14 @@
  
     <script type="text/javascript">
 
-    const PAST_YEAR_ONLY = false; // should we include all crimes since 2001 or just crimes in past year
+    const PAST_YEAR_ONLY = false; // should we query the data set of all crimes since 2001 or just crimes in the past year
     const FILTER_UPSTREAM = true; // should filtering happen on server or client side? (Note client side filtering gives a few hundred more matches, there is some discrepancy in how we filter upstream)
 
     // Set map's center location. All datapoints are filtered to be <= MAX_DIST from this center point.
 
     const MAX_DIST = 1; // in kilometers
 
-    // Note that date filtering only supported when PAST_YEAR_ONLY = false, otherwise you just get the past year
-    const MIN_DATE = '2017-01-10T12:00:00';
+    const MIN_DATE = '2017-09-10T12:00:00';
     const MAX_DATE = '2022-09-10T12:00:00';
 
     // One chicago
@@ -44,15 +43,11 @@
 
 
     // Note the dataset is a socrata API, so it supports some querying. ie. limits, pagination, filtering, ...
-    // It seems Chicago hasn't updated their data set to socrata 2.1, so we can't do distance based queries like: https://dev.socrata.com/docs/functions/distance_in_meters.html
-    // We're therefore forced to filter by distance on the client side, but theoretically could filter crime type server side
-    // Cureently, but we currently load the whole data set to the client and do all filtering locally
-
     // Entire data set since 2001 or just past years dataset
     const DATASET_URL = ['https://data.cityofchicago.org/resource/c4ep-ee5m.json', 'https://data.cityofchicago.org/resource/dfnk-7re6.json'];
 
     // Query used for Socrata SoQL filtering on the server side
-    const UPSTREAM_FILTER_QUERY = `SELECT * WHERE date between '${MIN_DATE}' and '${MAX_DATE}' AND within_circle(location, ${LAT_LONG[0]}, ${LAT_LONG[1]}, ${MAX_DIST * 1000}) AND (__PRIMARY__ like '%25BATTERY%25' OR __PRIMARY__ like '%25ROBBERY%25' OR __PRIMARY__ like '%25ASSAULT%25' OR __PRIMARY__ like '%25HOMICIDE%25' OR __SECONDARY__ like '%25HANDGUN%25' OR __SECONDARY__ like '%25GUN%25' OR __SECONDARY__ like '%25FIREARM%25' OR __SECONDARY__ like '%25WEAPON%25' OR __SECONDARY__ like '%25KNIFE%25' OR (__SECONDARY__ like '%25AGGRAVATED%25' AND NOT __SECONDARY__ like '%25NON-AGGRAVATED%25'))`.replaceAll('__PRIMARY__', PAST_YEAR_ONLY ? '_primary_decsription' : 'primary_type').replaceAll('__SECONDARY__', PAST_YEAR_ONLY ? '_secondary_description' : 'description');
+    const UPSTREAM_FILTER_QUERY = `SELECT * WHERE ${PAST_YEAR_ONLY ? 'date_of_occurrence' : 'date'} between '${MIN_DATE}' and '${MAX_DATE}' AND within_circle(location, ${LAT_LONG[0]}, ${LAT_LONG[1]}, ${MAX_DIST * 1000}) AND (__PRIMARY__ like '%25BATTERY%25' OR __PRIMARY__ like '%25ROBBERY%25' OR __PRIMARY__ like '%25ASSAULT%25' OR __PRIMARY__ like '%25HOMICIDE%25' OR __SECONDARY__ like '%25HANDGUN%25' OR __SECONDARY__ like '%25GUN%25' OR __SECONDARY__ like '%25FIREARM%25' OR __SECONDARY__ like '%25WEAPON%25' OR __SECONDARY__ like '%25KNIFE%25' OR (__SECONDARY__ like '%25AGGRAVATED%25' AND NOT __SECONDARY__ like '%25NON-AGGRAVATED%25'))`.replaceAll('__PRIMARY__', PAST_YEAR_ONLY ? '_primary_decsription' : 'primary_type').replaceAll('__SECONDARY__', PAST_YEAR_ONLY ? '_secondary_description' : 'description');
 
     const BASE_URL = DATASET_URL[PAST_YEAR_ONLY ? 1 : 0] + (FILTER_UPSTREAM ? `?$query=${UPSTREAM_FILTER_QUERY} OFFSET ` : '?$offset=');
 
