@@ -14,24 +14,17 @@
         }
     </style>
 
-    <!-- https://data.seattle.gov/resource/v5tj-kqhc.json?$order=distance_in_meters(location,%20%27POINT(41.8966166%20-87.6294048)%27)&$limit=5&$select=*,%20distance_in_meters(location_1,%20%27POINT(-122.3194183%2047.6145784)%27)%20AS%20range -->
-
     <script async src="https://maps.googleapis.com/maps/api/js"></script>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
  
     <script type="text/javascript">
 
-    const BAD_COLORS = ['white', 'yellow', 'orange', 'red'];
-
-    // past years dataset: https://data.cityofchicago.org/resource/dfnk-7re6.json
-    // entire data set: https://data.cityofchicago.org/resource/c4ep-ee5m.json
-    // Note the dataset is a socrata API, so it supports some querying. ie. limits, pagination, filtering, ...
-    // It seems Chicago hasn't updated their data set to socrata 2.1, so we can't do distance based queries like: https://dev.socrata.com/docs/functions/distance_in_meters.html
-    // We're therefore forced to filter by distance on the client side, but theoretically could filter crime type server side
-    // Cureently, but we currently load the whole data set to the client and do all filtering locally
-    const DATASET_URL = 'https://data.cityofchicago.org/resource/dfnk-7re6.json';
+    const PAST_YEAR_ONLY = true; // should we include all crimes since 2001 or just crimes in past year
+    const FILTER_UPSTREAM = true; // should filtering happen on server or client side? (Note client side filtering gives a few hundred more matches, there is some discrepancy in how we filter upstream)
 
     // Set map's center location. All datapoints are filtered to be <= MAX_DIST from this center point.
+
+    const MAX_DIST = 1; // in kilometers
 
     // One chicago
     const LAT_LONG = [41.8966166, -87.6294048];
@@ -42,37 +35,97 @@
     // Lincoln park
     // const LAT_LONG = [41.921181, -87.645157]
 
-    const MAX_DIST = 3.5; // in kilometers
 
-    // Note: yes the city of chicago spelled description wrong in their entire dataset (only misspelled primary description)
-    function violent({ _primary_decsription: _primary_description, _secondary_description, latitude, longitude }) {
+    // Note the dataset is a socrata API, so it supports some querying. ie. limits, pagination, filtering, ...
+    // It seems Chicago hasn't updated their data set to socrata 2.1, so we can't do distance based queries like: https://dev.socrata.com/docs/functions/distance_in_meters.html
+    // We're therefore forced to filter by distance on the client side, but theoretically could filter crime type server side
+    // Cureently, but we currently load the whole data set to the client and do all filtering locally
+
+    // Entire data set since 2001, past years dataset
+    const DATASET_URL = ['https://data.cityofchicago.org/resource/c4ep-ee5m.json', 'https://data.cityofchicago.org/resource/dfnk-7re6.json'];
+
+    const UPSTREAM_FILTER_QUERY = "SELECT * WHERE __PRIMARY__ like '%25BATTERY%25' OR __PRIMARY__ like '%25ROBBERY%25' OR __PRIMARY__ like '%25ASSAULT%25' OR __PRIMARY__ like '%25HOMICIDE%25' OR __SECONDARY__ like '%25HANDGUN%25' OR __SECONDARY__ like '%25GUN%25' OR __SECONDARY__ like '%25FIREARM%25' OR __SECONDARY__ like '%25WEAPON%25' OR __SECONDARY__ like '%25KNIFE%25' OR (__SECONDARY__ like '%25AGGRAVATED%25' AND NOT __SECONDARY__ like '%25NON-AGGRAVATED%25')".replaceAll('__PRIMARY__', PAST_YEAR_ONLY ? '_primary_decsription' : 'primary_type').replaceAll('__SECONDARY__', PAST_YEAR_ONLY ? '_secondary_description' : 'description');
+
+    const BASE_URL = DATASET_URL[PAST_YEAR_ONLY ? 1 : 0] + (FILTER_UPSTREAM ? `?$query=${UPSTREAM_FILTER_QUERY} OFFSET ` : '?$offset=');
+
+    const CRIME_COLORS = ['white', 'yellow', 'orange', 'red']; // increasing severity
+
+    // Note: yes the city of chicago spelled description wrong in their entire past year dataset (only misspelled primary description)
+    let matches = 0;
+    function violent({ _primary_decsription: _primary_description, _secondary_description, latitude, longitude, primary_type, description }) {
+
+        // if (getDistanceFromLatLonInKm(Number(latitude), Number(longitude), ...LAT_LONG) > MAX_DIST)
+        //     return undefined;
+
+        const prim = _primary_description?.toLowerCase() || primary_type.toLowerCase();
+        const sec = _secondary_description?.toLowerCase() || description.toLowerCase();
+
+        let violentCrime = false;
+        let highestSeverity = false;
+
+        let severity = -1;
+
+        if (prim.includes('battery') || prim.includes('robbery') || prim.includes('assault')) {
+            severity = 0;
+            violentCrime = true;
+        } else if (prim.includes('homicide')) {
+            highestSeverity = violentCrime = true;
+        }
+
+        if (sec.includes('gun') || sec.includes('firearm')) {
+            if (violentCrime) {
+                severity = 2;
+            } else if (sec.includes('reckless') && sec.includes('discharge')) {
+                severity = 2;
+            } else if (sec.includes('unlawful use')) {
+                severity = 1;
+            } else if (prim.includes('ritualism')) {
+                severity = 1; // ritual mutilation hand gun
+            } else if (sec.includes('unlawful poss') || sec.includes('unlawful sale') || sec.includes('deface ident')) {
+                severity = 0;
+            } else if (sec.includes('registration violation') || sec.includes('annual registration') || sec.includes('foid card') || sec.includes('duty to') || prim.includes('non-criminal')) {
+                // failure to renew firearm license, carry permit card, or to register as previous offender/update information
+            } else {
+                console.log(arguments[0]);
+                throw Error('Unknown offense');
+            }
+        } else if (sec.includes('weapon') || sec.includes('knife') || (sec.includes('aggravated') && !sec.includes('non-aggravated'))) {
+            if (prim.includes('kidnapping')) {
+                severity = 2;
+            } else if (sec.includes('sexual')) {
+                severity = 2;
+            } else if (prim.includes('arson')) {
+                severity = 2;
+            } else if (sec.includes('unlawful use')) {
+                severity = 1;
+            } else if (prim.includes('stalking')) {
+                severity = 1;
+            } else if (violentCrime) {
+                severity = 1;
+            } else if (prim.includes('ritualism')) {
+                severity = 0; // ritual mutiliation
+            } else if ((sec.includes('other') && sec.includes('violation')) || sec.includes('board plane')) {
+
+            } else if (sec.includes('financial') || sec.includes('computer')) {
+
+            } else {
+                console.log(arguments[0]);
+                throw Error('Unknown offense');
+            }
+        }
+
+        if (highestSeverity || severity >= 0)  {
+            matches++;
+        }
 
         if (getDistanceFromLatLonInKm(Number(latitude), Number(longitude), ...LAT_LONG) > MAX_DIST)
             return undefined;
 
-        const prim = _primary_description.toLowerCase();
-        const sec = _secondary_description.toLowerCase();
-
-        let badness = -1;
-        let worst = false;
-
-        if (prim.includes('battery') || prim.includes('robbery') || prim.includes('assault')) {
-            badness = 0;
-        } else if (prim.includes('homicide')) {
-            worst = true;
-        }
-
-        if (sec.includes('gun') || sec.includes('firearm')) {
-            badness += 2;
-        } else if (sec.includes('dangerous weapon') || sec.includes('knife') || (sec.includes('aggravated') && !sec.includes('non-aggravated'))) {
-            badness++;
-        }
-
       
-        if (worst || badness >= 0) {
+        if (highestSeverity || severity >= 0) {
             return {
                 path: google.maps.SymbolPath.CIRCLE,
-                fillColor: BAD_COLORS[worst ? BAD_COLORS.length - 1 : badness],
+                fillColor: CRIME_COLORS[highestSeverity ? CRIME_COLORS.length - 1 : severity],
                 fillOpacity: 0.6,
                 strokeOpacity: 0.9,
                 strokeWeight: 0,
@@ -111,8 +164,12 @@
         let last_len = undefined;
         let cum_len = 0;
         do {
+            console.log(`Fetching dataset entries at offset ${cum_len || 0}...`)
             await new Promise(res => {
-                $.getJSON(DATASET_URL + '?$offset=' + cum_len, function(data, textstatus) {
+                // const URL = `${DATASET_URL}?$query=${QUERY} OFFSET ${cum_len}`;
+                // console.log(`Querying URL ${URL} ...`);
+
+                $.getJSON(BASE_URL + cum_len, function(data, textstatus) {
     
                     last_len = data.length;
                     cum_len += last_len;
@@ -124,7 +181,7 @@
                 });
             });
         } while (last_len > 0 && last_len !== undefined);
-        console.log(`Done querying, total dataset size: ${cum_len}`);
+        console.log(`Done querying, total dataset size: ${cum_len}. Number of matching violent crimes throughout entire city: ${matches}`);
     });
 
     // from: https://stackoverflow.com/questions/18883601/function-to-calculate-distance-between-two-coordinates
