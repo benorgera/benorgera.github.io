@@ -24,10 +24,10 @@
 
     // Set map's center location. All datapoints are filtered to be <= MAX_DIST from this center point.
 
-    const MAX_DIST = 1.5; // in kilometers
+    const MAX_DIST = 1; // in kilometers
 
     // Note that date filtering only supported when PAST_YEAR_ONLY = false, otherwise you just get the past year
-    const MIN_DATE = '2016-01-10T12:00:00';
+    const MIN_DATE = '2017-01-10T12:00:00';
     const MAX_DATE = '2022-09-10T12:00:00';
 
     // One chicago
@@ -37,7 +37,10 @@
     // const LAT_LONG = [41.762901, -87.575795];
 
     // Lincoln park
-    const LAT_LONG = [41.921181, -87.645157]
+    // const LAT_LONG = [41.921181, -87.645157]
+
+    // Old town
+    const LAT_LONG = [41.911410, -87.639912];
 
 
     // Note the dataset is a socrata API, so it supports some querying. ie. limits, pagination, filtering, ...
@@ -49,7 +52,7 @@
     const DATASET_URL = ['https://data.cityofchicago.org/resource/c4ep-ee5m.json', 'https://data.cityofchicago.org/resource/dfnk-7re6.json'];
 
     // Query used for Socrata SoQL filtering on the server side
-    const UPSTREAM_FILTER_QUERY = `SELECT * WHERE date between '${MIN_DATE}' and '${MAX_DATE}' AND (__PRIMARY__ like '%25BATTERY%25' OR __PRIMARY__ like '%25ROBBERY%25' OR __PRIMARY__ like '%25ASSAULT%25' OR __PRIMARY__ like '%25HOMICIDE%25' OR __SECONDARY__ like '%25HANDGUN%25' OR __SECONDARY__ like '%25GUN%25' OR __SECONDARY__ like '%25FIREARM%25' OR __SECONDARY__ like '%25WEAPON%25' OR __SECONDARY__ like '%25KNIFE%25' OR (__SECONDARY__ like '%25AGGRAVATED%25' AND NOT __SECONDARY__ like '%25NON-AGGRAVATED%25'))`.replaceAll('__PRIMARY__', PAST_YEAR_ONLY ? '_primary_decsription' : 'primary_type').replaceAll('__SECONDARY__', PAST_YEAR_ONLY ? '_secondary_description' : 'description');
+    const UPSTREAM_FILTER_QUERY = `SELECT * WHERE date between '${MIN_DATE}' and '${MAX_DATE}' AND within_circle(location, ${LAT_LONG[0]}, ${LAT_LONG[1]}, ${MAX_DIST * 1000}) AND (__PRIMARY__ like '%25BATTERY%25' OR __PRIMARY__ like '%25ROBBERY%25' OR __PRIMARY__ like '%25ASSAULT%25' OR __PRIMARY__ like '%25HOMICIDE%25' OR __SECONDARY__ like '%25HANDGUN%25' OR __SECONDARY__ like '%25GUN%25' OR __SECONDARY__ like '%25FIREARM%25' OR __SECONDARY__ like '%25WEAPON%25' OR __SECONDARY__ like '%25KNIFE%25' OR (__SECONDARY__ like '%25AGGRAVATED%25' AND NOT __SECONDARY__ like '%25NON-AGGRAVATED%25'))`.replaceAll('__PRIMARY__', PAST_YEAR_ONLY ? '_primary_decsription' : 'primary_type').replaceAll('__SECONDARY__', PAST_YEAR_ONLY ? '_secondary_description' : 'description');
 
     const BASE_URL = DATASET_URL[PAST_YEAR_ONLY ? 1 : 0] + (FILTER_UPSTREAM ? `?$query=${UPSTREAM_FILTER_QUERY} OFFSET ` : '?$offset=');
 
@@ -58,9 +61,6 @@
     // Note: yes the city of chicago spelled description wrong in their entire past year dataset (only misspelled primary description)
     let matches = 0;
     function violent({ _primary_decsription: _primary_description, _secondary_description, latitude, longitude, primary_type, description }) {
-
-        // if (getDistanceFromLatLonInKm(Number(latitude), Number(longitude), ...LAT_LONG) > MAX_DIST)
-        //     return undefined;
 
         const prim = _primary_description?.toLowerCase() || primary_type.toLowerCase();
         const sec = _secondary_description?.toLowerCase() || description.toLowerCase();
@@ -119,24 +119,13 @@
             }
         }
 
-        if (highestSeverity || severity >= 0)  {
-            matches++;
-        }
+        if (highestSeverity || severity >= 0) matches++;
+        
 
         if (getDistanceFromLatLonInKm(Number(latitude), Number(longitude), ...LAT_LONG) > MAX_DIST)
-            return undefined;
+            throw Error('This shouldn\'t happen');
 
-      
-        if (highestSeverity || severity >= 0) {
-            return {
-                path: google.maps.SymbolPath.CIRCLE,
-                fillColor: CRIME_COLORS[highestSeverity ? CRIME_COLORS.length - 1 : severity],
-                fillOpacity: 0.6,
-                strokeOpacity: 0.9,
-                strokeWeight: 0,
-                scale: 4
-            };
-        } else return undefined;
+        return highestSeverity ? CRIME_COLORS.length - 1 : severity >= 0 ? severity : undefined;
     }
 
     $(window).on('load', async function() {
@@ -144,22 +133,39 @@
         // Intialize our map
         const center = new google.maps.LatLng(...LAT_LONG);
         const mapOptions = {
-          zoom: 13,
+          zoom: 16,
           center: center
         }
         const map = new google.maps.Map(document.getElementById("map"), mapOptions);
 
+        const markers = {};
+
         function processCrimeEntry(entry) {
 
-            const icon = violent(entry);
+            const severity = violent(entry);
     
-            if (icon) {
-                new google.maps.Marker({
+            if (severity !== undefined) {
+                const markerParams = {
                     position: new google.maps.LatLng(entry.latitude, entry.longitude),
                     map: map,
                     // title: location.name,
-                    icon
-                });
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        fillColor: CRIME_COLORS[severity],
+                        fillOpacity: Math.min(0.3 * severity + 0.3, 1),
+                        strokeOpacity: 0,
+                        strokeWeight: 0,
+                        scale: severity === CRIME_COLORS.length - 1 ? 5.5 : 4
+                    }
+                };
+
+                // render low severity dots immediately, delay others so they show up on top (google maps doesn't really support layering, but adding markers later seems to get them closer to the top layer on average)
+                if (severity === 0)
+                    new google.maps.Marker(markerParams);
+                else {
+                    if (!(severity in markers)) markers[severity] = [];
+                    markers[severity].push(markerParams);
+                }
             }
         }
 
@@ -186,7 +192,14 @@
                 });
             });
         } while (last_len > 0 && last_len !== undefined);
-        console.log(`Done querying, total dataset size: ${cum_len}. Number of matching violent crimes throughout entire city: ${matches}`);
+
+        console.log(`Done querying, total dataset size: ${cum_len}. Number of matching violent crimes throughout queried data: ${matches}`);
+
+        for (let sev = 0; sev < CRIME_COLORS.length; sev++) {
+            for (const markerParams of markers[sev] || []) {
+                new google.maps.Marker(markerParams);
+            }
+        }
     });
 
     // from: https://stackoverflow.com/questions/18883601/function-to-calculate-distance-between-two-coordinates
