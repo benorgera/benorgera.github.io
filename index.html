@@ -19,28 +19,27 @@
  
     <script type="text/javascript">
 
+    // --- Configuration ---
+
+    // Set map's center location. All datapoints are filtered to be <= MAX_DIST from this center point.
+    const MAX_DIST = 1; // in kilometers
+    // const LAT_LONG = [41.762901, -87.575795]; // The most dangerous neighborhood
+    // const LAT_LONG = [41.921181, -87.645157]; // Lincoln park
+    // const LAT_LONG = [41.911410, -87.639912]; // Old town
+    const LAT_LONG = [41.8966166, -87.6294048]; // River north (centered around One Chicago building)
+
+
+    // Set date range filter
+    const MIN_DATE = '2019-09-10T12:00:00';
+    const MAX_DATE = '2022-09-10T12:00:00';
+
+
     const PAST_YEAR_ONLY = false; // should we query the data set of all crimes since 2001 or just crimes in the past year
     const FILTER_UPSTREAM = true; // should filtering happen on server or client side? (Note client side filtering gives a few hundred more matches, there is some discrepancy in how we filter upstream)
 
-    // Set map's center location. All datapoints are filtered to be <= MAX_DIST from this center point.
+    // --- End Configuration ---
 
-    const MAX_DIST = 1; // in kilometers
-
-    const MIN_DATE = '2017-09-10T12:00:00';
-    const MAX_DATE = '2022-09-10T12:00:00';
-
-    // One chicago
-    // const LAT_LONG = [41.8966166, -87.6294048];
-
-    // The most dangerous neighborhood
-    // const LAT_LONG = [41.762901, -87.575795];
-
-    // Lincoln park
-    // const LAT_LONG = [41.921181, -87.645157]
-
-    // Old town
-    const LAT_LONG = [41.911410, -87.639912];
-
+    const CRIME_COLORS = ['white', 'yellow', 'orange', 'red']; // increasing severity
 
     // Note the dataset is a socrata API, so it supports some querying. ie. limits, pagination, filtering, ...
     // Entire data set since 2001 or just past years dataset
@@ -51,9 +50,7 @@
 
     const BASE_URL = DATASET_URL[PAST_YEAR_ONLY ? 1 : 0] + (FILTER_UPSTREAM ? `?$query=${UPSTREAM_FILTER_QUERY} OFFSET ` : '?$offset=');
 
-    const CRIME_COLORS = ['white', 'yellow', 'orange', 'red']; // increasing severity
-
-    // Note: yes the city of chicago spelled description wrong in their entire past year dataset (only misspelled primary description)
+    // Note: yes the city of chicago spelled description as decsription in their entire past year dataset (only misspelled primary description)
     let matches = 0;
     function violent({ _primary_decsription: _primary_description, _secondary_description, latitude, longitude, primary_type, description }) {
 
@@ -172,8 +169,6 @@
         do {
             console.log(`Fetching dataset entries at offset ${cum_len || 0}...`)
             await new Promise(res => {
-                // const URL = `${DATASET_URL}?$query=${QUERY} OFFSET ${cum_len}`;
-                // console.log(`Querying URL ${URL} ...`);
 
                 $.getJSON(BASE_URL + cum_len, function(data, textstatus) {
     
